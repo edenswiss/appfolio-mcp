@@ -5,7 +5,7 @@ import express from 'express';
 
 const APPFOLIO_CLIENT_ID = process.env.APPFOLIO_CLIENT_ID;
 const APPFOLIO_CLIENT_SECRET = process.env.APPFOLIO_CLIENT_SECRET;
-const APPFOLIO_DATABASE = process.env.APPFOLIO_DATABASE; // e.g. "yourcompany" from yourcompany.appfolio.com
+const APPFOLIO_DATABASE = process.env.APPFOLIO_DATABASE;
 
 if (!APPFOLIO_CLIENT_ID || !APPFOLIO_CLIENT_SECRET || !APPFOLIO_DATABASE) {
   console.error('Missing required env vars: APPFOLIO_CLIENT_ID, APPFOLIO_CLIENT_SECRET, APPFOLIO_DATABASE');
@@ -49,54 +49,56 @@ async function fetchAppFolioReport(reportName, params = {}) {
   return response.json();
 }
 
-const server = new McpServer({ name: 'appfolio', version: '1.0.0' });
+function createMcpServer() {
+  const server = new McpServer({ name: 'appfolio', version: '1.0.0' });
 
-server.tool(
-  'list_appfolio_reports',
-  'List all available AppFolio report types you can fetch.',
-  {},
-  async () => ({
-    content: [{
-      type: 'text',
-      text: AVAILABLE_REPORTS.map(r => `- ${r.name}: ${r.description}`).join('\n'),
-    }],
-  })
-);
+  server.tool(
+    'list_appfolio_reports',
+    'List all available AppFolio report types you can fetch.',
+    {},
+    async () => ({
+      content: [{
+        type: 'text',
+        text: AVAILABLE_REPORTS.map(r => `- ${r.name}: ${r.description}`).join('\n'),
+      }],
+    })
+  );
 
-server.tool(
-  'get_appfolio_report',
-  'Fetch a report from AppFolio by name. Returns the full report data.',
-  {
-    report_name: z.string().describe(
-      'Report name, e.g. rent_roll, delinquency, owner_statement. Use list_appfolio_reports to see all options.'
-    ),
-    params: z.record(z.any()).optional().describe(
-      'Optional report filters, e.g. { "start_date": "2026-01-01", "end_date": "2026-06-30" }'
-    ),
-  },
-  async ({ report_name, params }) => {
-    try {
-      const data = await fetchAppFolioReport(report_name, params || {});
-      return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
-    } catch (err) {
-      return { content: [{ type: 'text', text: `Error: ${err.message}` }], isError: true };
+  server.tool(
+    'get_appfolio_report',
+    'Fetch a report from AppFolio by name. Returns the full report data.',
+    {
+      report_name: z.string().describe('Report name, e.g. rent_roll, delinquency, owner_statement.'),
+      params: z.record(z.any()).optional().describe('Optional filters e.g. { "start_date": "2026-01-01", "end_date": "2026-06-30" }'),
+    },
+    async ({ report_name, params }) => {
+      try {
+        const data = await fetchAppFolioReport(report_name, params || {});
+        return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+      } catch (err) {
+        return { content: [{ type: 'text', text: `Error: ${err.message}` }], isError: true };
+      }
     }
-  }
-);
+  );
+
+  return server;
+}
 
 const app = express();
 app.use(express.json());
 
 app.post('/mcp', async (req, res) => {
+  const server = createMcpServer();
   const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
-  res.on('close', () => transport.close());
+  res.on('close', () => { transport.close(); server.close(); });
   await server.connect(transport);
   await transport.handleRequest(req, res, req.body);
 });
 
 app.get('/mcp', async (req, res) => {
+  const server = createMcpServer();
   const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
-  res.on('close', () => transport.close());
+  res.on('close', () => { transport.close(); server.close(); });
   await server.connect(transport);
   await transport.handleRequest(req, res);
 });
